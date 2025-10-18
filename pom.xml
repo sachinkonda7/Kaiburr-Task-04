@@ -1,0 +1,105 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.0</version>
+        <relativePath/> <!-- lookup parent from repository -->
+    </parent>
+
+    <!-- Project coordinates -->
+    <groupId>com.kaiburr</groupId>
+    <artifactId>taskapi</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging> <!-- Specifies the output will be a JAR file -->
+
+    <name>Kaiburr Task API</name>
+    <description>Spring Boot REST API for Kaiburr Assessment</description>
+
+    <!--
+         Properties section. You've correctly set the Java version to 17.
+        Make sure your system's JAVA_HOME environment variable points to a JDK 17 installation.
+    -->
+    <properties>
+        <java.version>17</java.version>
+    </properties>
+
+    <dependencies>
+        <!--
+             Core dependency for building web applications, including RESTful APIs.
+            This brings in Spring MVC, an embedded Tomcat server, and other web essentials.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!--
+             Dependency for using MongoDB databases with Spring Data.
+            This provides the necessary libraries to connect to and interact with MongoDB.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-mongodb</artifactId>
+        </dependency>
+
+        <!--
+             Dependency for using Java Bean Validation with annotations like @NotNull, @Size, etc.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <!--
+             Lombok is a library to reduce boilerplate code (like getters, setters, constructors).
+            'optional>true' is correct, as it's a compile-time tool and not needed at runtime by other projects
+            that might use your JAR.
+        -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!--
+             Core dependency for testing Spring Boot applications.
+            The 'test' scope means it's only available during the test phase of the build.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+                 This plugin is essential for Spring Boot. It packages the application into an
+                executable JAR and handles other Spring Boot-specific build tasks.
+            -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <!--
+                    This configuration is a best practice for projects using Lombok.
+                    It excludes the Lombok dependency from the final executable JAR, as it is only
+                    needed during compile time and not at runtime.
+                -->
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>
