@@ -1,4 +1,6 @@
 D:\Kaiburr\src\main\java\com\kaiburr\taskapi\controller\TaskController.java
+D:\Kaiburr\src\main\java\com\kaiburr\taskapi\controller\TaskPayload.java
+D:\Kaiburr\src\main\java\com\kaiburr\taskapi\exception\ApiExceptionHandler.java
 D:\Kaiburr\src\main\java\com\kaiburr\taskapi\exception\ResourceNotFoundException.java
 D:\Kaiburr\src\main\java\com\kaiburr\taskapi\model\Task.java
 D:\Kaiburr\src\main\java\com\kaiburr\taskapi\model\TaskExecution.java
