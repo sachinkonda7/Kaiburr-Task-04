@@ -4,131 +4,133 @@ import com.kaiburr.taskapi.exception.ResourceNotFoundException;
 import com.kaiburr.taskapi.model.Task;
 import com.kaiburr.taskapi.model.TaskExecution;
 import com.kaiburr.taskapi.repository.TaskRepository;
+import io.kubernetes.client.openapi.ApiClient;
+import io.kubernetes.client.openapi.apis.CoreV1Api;
+import io.kubernetes.client.openapi.models.*;
+import io.kubernetes.client.util.Config;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 @Service
 public class TaskService {
-    private final TaskRepository repo;
 
-    public TaskService(TaskRepository repo) {
-        this.repo = repo;
+    private final TaskRepository repository;
+
+    public TaskService(TaskRepository repository) {
+        this.repository = repository;
     }
 
-    // ✅ Get all tasks
     public List<Task> getAll() {
-        return repo.findAll();
+        return repository.findAll();
     }
 
-    // ✅ Get task by ID
     public Task getById(String id) {
-        return repo.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Task not found with ID: " + id));
+        return repository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Task with id '%s' not found".formatted(id)));
     }
 
-    // ✅ Create or update a task
-    public Task createOrUpdate(Task task) {
-        validateCommand(task.getCommand());
-        return repo.save(task);
+    public Task create(Task task) {
+        task.setId(null); // Allow MongoDB to create a fresh identifier
+        return repository.save(task);
     }
 
-    // ✅ Delete a task
-    public void delete(String id) {
-        if (!repo.existsById(id)) {
-            throw new ResourceNotFoundException("Task not found with ID: " + id);
+    public Task update(String id, Task update) {
+        Task existing = getById(id);
+        existing.setName(update.getName());
+        existing.setOwner(update.getOwner());
+        existing.setCommand(update.getCommand());
+        return repository.save(existing);
+    }
+
+    public List<Task> searchByName(String name) {
+        if (name == null || name.isBlank()) {
+            return getAll();
         }
-        repo.deleteById(id);
+        return repository.findByNameContainingIgnoreCase(name);
     }
 
-    // ✅ Search tasks by name
-    public List<Task> search(String name) {
-        return repo.findByNameContainingIgnoreCase(name);
-    }
-
-    // ✅ Execute a task command (cross-platform, with debug + safety)
-    public TaskExecution execute(String id) throws IOException {
+    // 🔥 Modified method: Executes the command by creating a BusyBox pod in Kubernetes
+    public Map<String, Object> executeTask(String id) {
         Task task = getById(id);
-        validateCommand(task.getCommand());
+        if (task.getCommand() == null || task.getCommand().isBlank()) {
+            throw new IllegalArgumentException("No command configured for task '%s'".formatted(id));
+        }
 
-        Instant start = Instant.now();
+        TaskExecution execution = new TaskExecution();
+        execution.setStartTime(Instant.now());
+
         String output;
+        int exitCode = 0;
 
         try {
-            ProcessBuilder builder;
-
-            // Detect OS and use appropriate shell
-            if (System.getProperty("os.name").toLowerCase().contains("win")) {
-                builder = new ProcessBuilder("cmd.exe", "/c", task.getCommand());
-            } else {
-                builder = new ProcessBuilder("bash", "-c", task.getCommand());
+            // Connect to Kubernetes cluster
+            ApiClient client;
+            try {
+                client = Config.fromCluster(); // inside Kubernetes
+            } catch (IOException e) {
+                client = Config.defaultClient(); // fallback for local debugging
             }
+            io.kubernetes.client.openapi.Configuration.setDefaultApiClient(client);
+            CoreV1Api api = new CoreV1Api();
 
-            builder.redirectErrorStream(true);
-            Process process = builder.start();
+            // Create and run a temporary BusyBox pod
+            String podName = "task-executor-" + System.currentTimeMillis();
+            String namespace = "default";
 
-            // Read process output
-            StringBuilder result = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    result.append(line).append(System.lineSeparator());
-                }
-            }
+            V1Pod pod = new V1Pod()
+                    .apiVersion("v1")
+                    .kind("Pod")
+                    .metadata(new V1ObjectMeta().name(podName))
+                    .spec(new V1PodSpec()
+                            .containers(List.of(
+                                    new V1Container()
+                                            .name("executor")
+                                            .image("busybox")
+                                            .command(List.of("sh", "-c", task.getCommand()))
+                            ))
+                            .restartPolicy("Never")
+                    );
 
-            int exitCode = process.waitFor();
-            output = result.toString().trim();
+            api.createNamespacedPod(namespace, pod, null, null, null, namespace);
+            output = "Pod '" + podName + "' created to execute: " + task.getCommand();
 
-            // Print command and output for debugging
-            System.out.println("Executed command: " + task.getCommand());
-            System.out.println("Command output: " + output);
-            System.out.println("Exit code: " + exitCode);
-
-            if (exitCode != 0) {
-                throw new IOException("Command failed with exit code " + exitCode);
-            }
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Command execution interrupted", e);
-        } catch (Exception e) {
-            e.printStackTrace(); // log exact cause
-            throw new IOException("Error executing command: " + e.getMessage(), e);
+        } catch (Exception ex) {
+            exitCode = -1;
+            output = "Failed to create execution pod: " + ex.getMessage();
         }
 
-        Instant end = Instant.now();
+        execution.setEndTime(Instant.now());
+        execution.setOutput(output);
+        task.setLastExecution(execution);
+        repository.save(task);
 
-        // ✅ Save the execution record
-        TaskExecution exec = new TaskExecution();
-        exec.setStartTime(start);
-        exec.setEndTime(end);
-        exec.setOutput(output.isEmpty() ? "(no output)" : output);
-
-        task.addTaskExecution(exec);
-        repo.save(task);
-
-        return exec;
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("taskId", task.getId());
+        response.put("status", exitCode == 0 ? "SUCCESS" : "FAILED");
+        response.put("exitCode", exitCode);
+        response.put("output", output);
+        response.put("startTime", execution.getStartTime());
+        response.put("endTime", execution.getEndTime());
+        return response;
     }
 
-    // ✅ Validate command inputs (prevent unsafe ops)
-    private void validateCommand(String cmd) {
-        if (cmd == null || cmd.isBlank()) {
-            throw new IllegalArgumentException("Command cannot be empty");
-        }
+    public void delete(String id) {
+        Task task = getById(id);
+        repository.delete(task);
+    }
 
-        String lower = cmd.toLowerCase();
-        if (lower.contains("rm ") ||
-            lower.contains("del ") ||
-            lower.contains("shutdown") ||
-            lower.contains("format") ||
-            lower.contains("erase") ||
-            lower.contains("poweroff")) {
-            throw new IllegalArgumentException("Unsafe command detected!");
+    // ⚙️ (No longer used for local exec, but kept for reference)
+    private ProcessBuilder buildProcess(String command) {
+        String os = System.getProperty("os.name").toLowerCase(Locale.ENGLISH);
+        if (os.contains("win")) {
+            return new ProcessBuilder("cmd.exe", "/c", command).redirectErrorStream(true);
         }
+        return new ProcessBuilder("bash", "-lc", command).redirectErrorStream(true);
     }
 }

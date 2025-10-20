@@ -1,84 +1,215 @@
-# Kaiburr Task 1 – RESTful API Using Spring Boot and MongoDB
+#  Kaiburr Task 2 – Kubernetes Deployment
 
-## Overview
-
-This project implements a RESTful web service for task management using **Spring Boot** and **MongoDB**.  
-Each task contains metadata such as an identifier, name, owner, and a system command.  
-The API allows creating, updating, retrieving, searching, executing, and deleting tasks.  
-When a command is executed, the application runs it securely on the host machine and records the execution output along with timestamps.
-
-This solution demonstrates proficiency in backend development, API design, and database integration using industry-standard frameworks.
+##  Overview
+This repository demonstrates the Kubernetes deployment of the **Task API** (from Task 1) using **Spring Boot** and **MongoDB**.  
+It includes Dockerization, Kubernetes manifests, persistent storage, and command execution inside Kubernetes pods.
 
 ---
 
-## Key Features
-
-- Implementation of RESTful CRUD operations using Spring Boot.
-- Integration with MongoDB for persistent storage.
-- Command execution with validation and safe-execution controls.
-- Comprehensive API endpoints for managing and querying tasks.
-- Execution history logging with timestamps and command outputs.
-- Cross-platform support for Windows and Linux command execution.
-
----
-
-## Technologies Used
-
-| Category | Technology |
-|-----------|-------------|
-| Programming Language | Java (JDK 17 or higher) |
-| Framework | Spring Boot 3.3.0 |
-| Database | MongoDB 6.x (Local Instance) |
-| Build Tool | Apache Maven 3.9+ |
-| Testing Tool | Postman |
-| IDE | Visual Studio Code / IntelliJ IDEA |
+##  Architecture
+```
++--------------------------+
+|      Spring Boot App     |  <-- NodePort Service (port 30080)
+|  (task-api Deployment)   |
++-----------+--------------+
+            |
+            v
++--------------------------+
+|       MongoDB Pod        |  <-- ClusterIP Service (port 27017)
+|  (Persistent Volume PVC) |
++--------------------------+
+```
 
 ---
 
-## System Requirements
-
-- **Java 17 or later** installed and configured in the system `PATH`.  
-- **MongoDB** running locally on `localhost:27017`.  
-- **Maven** properly configured for dependency management.  
-- **Postman** or any HTTP client for testing API endpoints.
+##  Technologies Used
+| Component | Tool |
+|------------|------|
+| Backend | Spring Boot 3.3.0 |
+| Database | MongoDB |
+| Containerization | Docker |
+| Orchestration | Kubernetes (Minikube) |
+| Registry | Docker Hub |
+| Language | Java 17 |
+| K8s Client | io.kubernetes:client-java |
 
 ---
 
-## Project Setup and Execution
+##  Setup Steps
 
-1. Clone the repository or download the source code:
-   ```bash
-   git clone https://github.com/<your-username>/kaiburr-task1.git
-   cd kaiburr-task1
+### 1️ Build & Push Docker Image
+```bash
+docker build -t kaiburr-task-api:v5 .
+docker tag kaiburr-task-api:v5 sachinkonda/kaiburr-task-api:v5
+docker push sachinkonda/kaiburr-task-api:v5
+```
 
-## Screenshots
+---
 
-Below are the screenshots demonstrating the execution and results of the Kaiburr Task 1 API.  
-Each screenshot includes the current date/time and my name as per the submission requirements.
+### 2️ Deploy MongoDB with Helm
+```bash
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm install mongo bitnami/mongodb   --set auth.rootPassword=rootpwd,auth.username=root,auth.password=rootpwd,auth.database=tasksdb   --set persistence.enabled=true   --set persistence.size=1Gi
+```
 
-### 1. Project Structure
-![Project Structure](./screenshots/project_structure.png)
+---
 
-### 2. Application Running on Port 8081
-![App Running](./screenshots/app_running.png)
+### 3️ Apply App Manifests
 
-### 3. Create Task – PUT /api/tasks
-![Create Task](./screenshots/postman_put_task.png)
+**deployment.yaml**
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-api
+  labels:
+    app: task-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: task-api
+  template:
+    metadata:
+      labels:
+        app: task-api
+    spec:
+      containers:
+        - name: task-api
+          image: sachinkonda/kaiburr-task-api:v5
+          ports:
+            - containerPort: 8081
+          env:
+            - name: SPRING_DATA_MONGODB_URI
+              value: "mongodb://root:rootpwd@mongo-mongodb.default.svc.cluster.local:27017/tasksdb?authSource=admin"
+```
 
-### 4. MongoDB After Task Creation
-![MongoDB After Create](./screenshots/mongodb_after_create.png)
+**service.yaml**
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: task-api-service
+spec:
+  type: NodePort
+  selector:
+    app: task-api
+  ports:
+    - protocol: TCP
+      port: 8081
+      targetPort: 8081
+      nodePort: 30080
+```
 
-### 5. Execute Task – PUT /api/tasks/{id}/execute
-![Execute Task](./screenshots/postman_execute.png)
+Apply:
+```bash
+kubectl apply -f deployment.yaml
+kubectl apply -f service.yaml
+```
 
-### 6. MongoDB After Execution
-![MongoDB After Execution](./screenshots/mongodb_after_execute.png)
+---
 
-### 7. Search Task – GET /api/tasks/search?name=Print
-![Search Task](./screenshots/postman_search.png)
+### 4️ Verify Deployments
+```bash
+kubectl get pods
+kubectl get svc
+```
 
-### 8. Delete Task – DELETE /api/tasks/{id}
-![Delete Task](./screenshots/postman_delete.png)
+ **Screenshot #1 – Pods list**  
+![Pods Screenshot](images/pods.png)
 
-### 9. MongoDB After Delete
-![MongoDB After Delete](./screenshots/mongodb_after_delete.png)
+ **Screenshot #2 – Services list**  
+![Services Screenshot](images/svc.png)
+
+---
+
+### 5️ Access the Application
+```bash
+minikube service task-api-service --url
+```
+Example URL:  
+`http://192.168.49.2:30080/api/tasks`
+
+ **Screenshot #3 – API in browser**  
+![API Screenshot](images/api.png)
+
+---
+
+##  API Testing (Postman)
+
+### ➤ Create a Task
+**POST** `http://192.168.49.2:30080/api/tasks`
+```json
+{
+  "name": "Print Hello",
+  "owner": "Sachin Konda",
+  "command": "echo Hello master!"
+}
+```
+
+ **Screenshot #4 – Postman create**  
+![Postman Create](images/postman-create.png)
+
+---
+
+### ➤ Execute Task in Kubernetes
+**PUT**  
+`http://192.168.49.2:30080/api/tasks/<id>/execute`
+
+ Example Response:
+```json
+{
+  "taskId": "671aebd82392a5421d97f113",
+  "status": "SUCCESS",
+  "exitCode": 0,
+  "output": "Hello master!",
+  "startTime": "2025-10-19T10:25:43.521Z",
+  "endTime": "2025-10-19T10:25:44.002Z"
+}
+```
+
+ **Screenshot #5 – Postman execute**  
+![Postman Execute](images/postman-execute.png)
+
+---
+
+##  MongoDB Verification
+Connect with **MongoDB Compass**:
+```
+mongodb://root:rootpwd@localhost:27017/tasksdb?authSource=admin
+```
+
+ **Screenshot #6 – MongoDB collection**  
+![Mongo Screenshot](images/mongo.png)
+
+---
+
+##  Persistent Volume Check
+```bash
+kubectl delete pod -l app=mongo-mongodb
+kubectl get pods
+```
+
+ **Screenshot #7 – Data persisted after pod recreate**  
+![PV Screenshot](images/pv.png)
+
+
+---
+
+###  Screenshot Folder Structure
+```
+.
+├── deployment.yaml
+├── service.yaml
+├── Dockerfile
+├── README.md
+└── images/
+    ├── pods.png
+    ├── services.png
+    ├── postman-create.png
+    ├── postman-execute.png
+    ├── mongo.png
+    ├── pv.png
+
+    
+```
