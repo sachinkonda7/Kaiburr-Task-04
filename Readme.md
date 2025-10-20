@@ -1,230 +1,70 @@
-# Kaiburr Assessment – Tasks 1 to 4
+# Task 4 - CI/CD Pipeline (GitHub Actions)
 
-Personal submission for the Kaiburr hiring assessment. The repository contains:
+This repository implements **Task 4** of the Kaiburr assessment: delivering a continuous integration and delivery workflow for the sample application created in Tasks 1 and 3. The pipeline is built with **GitHub Actions** and fulfills the requirement to perform both a code build and a Docker image build on every change.
 
-- **Task 1** – Spring Boot REST API with MongoDB persistence and command execution
-- **Task 2** – Docker image + Kubernetes manifests, including BusyBox pod execution
-- **Task 3** – React 19 + TypeScript + Ant Design web console
-- **Task 4** – Automated CI/CD pipeline (GitHub Actions) with Maven, npm, and Docker build steps
+## Pipeline Overview
+- **Workflow file**: `.github/workflows/ci.yml`
+- **Triggers**: `push` and `pull_request` events targeting the `main` branch.
+- **Runtime**: `ubuntu-latest` GitHub-hosted runner.
+- **Services**: Ephemeral MongoDB 7 container used by the backend tests.
+- **Outputs**: Verified backend JAR, production-ready frontend build artifacts, and a Docker image tagged with the current commit SHA.
 
-All code was authored and verified by me. Screenshots and (optional) video evidence with my name and current timestamp will be attached before submission, per Kaiburr’s requirements.
+## Job Breakdown
+The single job named `build` executes the following steps in order:
 
-> ⚠️ Keep this repository private until submission. Do not share code or assets with other candidates.
+1. **Checkout**
+   - Uses `actions/checkout@v4` to fetch the repository.
 
----
+2. **Set up Java**
+   - Configures Temurin JDK 17 via `actions/setup-java@v4`.
+   - Enables Maven dependency caching for faster runs.
 
-## Table of Contents
+3. **Backend Build**
+   - Runs `mvn -B clean package` to compile the Spring Boot service, execute unit tests, and assemble the JAR.
 
-1. [Project Structure](#project-structure)  
-2. [Screenshots & Demo Video](#screenshots--demo-video)  
-3. [Task 1 – Spring Boot REST API](#task1--spring-boot-rest-api)  
-4. [Task 2 – Kubernetes Deployment](#task2--kubernetes-deployment)  
-5. [Task 3 – React Web UI](#task3--react-web-ui)  
-6. [Task 4 – CI/CD Pipeline](#task4--cicd-pipeline)  
-7. [Quality Gates & Troubleshooting](#quality-gates--troubleshooting)  
-8. [Submission Checklist](#submission-checklist)
+4. **Set up Node.js**
+   - Installs Node.js 22 with `actions/setup-node@v4`.
+   - Caches npm dependencies using `frontend/package-lock.json`.
 
----
+5. **Frontend Build**
+   - `npm ci` installs dependencies in the `frontend` directory.
+   - `npm run lint` enforces TypeScript and React lint rules.
+   - `npm run build` creates an optimized Vite production bundle.
 
-## Project Structure
+6. **Docker Image**
+   - Executes `docker build -t taskapi:${{ github.sha }} .` to create a container image that packages the freshly built backend artifacts.
 
-```
-.
-├── .github/workflows/ci.yml      # GitHub Actions pipeline (Task 4)
-├── Dockerfile                    # Spring Boot container image (Task 2)
-├── frontend/                     # React 19 + Ant Design UI (Task 3)
-├── images/                       # API/Kubernetes evidence (Task 1 & 2)
-├── fronted-images/               # UI screenshots (Task 3)
-├── k8/                           # Kubernetes manifests (Task 2)
-├── pom.xml                       # Maven descriptor
-├── src/                          # Java source, configs, tests
-└── README.md                     # This document
-```
+MongoDB is declared in the `services` block to supply the backend with a live database during the Maven test phase. Health checks ensure the database is available before tests run.
 
----
+## Environment Variables and Secrets
+- `SPRING_DATA_MONGODB_URI` is defined at the workflow level so the backend connects to the in-runner MongoDB instance.
+- No external secrets are required for this pipeline. If you push images to a registry, add credentials through the repository's GitHub Actions secrets and extend the workflow accordingly.
 
-## Screenshots & Demo Video
-
-Each screenshot must include **my name** and the **current date/time** (system clock, terminal prompt, etc.). Replace the placeholders below before submission.
-
-### Backend & Kubernetes Evidence (`images/`)
-
-| Scenario | Screenshot |
-| --- | --- |
-| Kubernetes pods | ![Pods](images/pods.png) |
-| Kubernetes services | ![Services](images/svc.png) |
-| API browser output | ![API](images/api.png) |
-| Postman – create task | ![Postman Create](images/postman-create.png) |
-| Postman – execute task | ![Postman Execute](images/postman-execute.png) |
-| MongoDB Compass | ![Mongo](images/mongo.png) |
-| Persistent volume verification | ![PV](images/pv.png) |
-| CI/CD pipeline run | ![CI pipeline placeholder](images/TODO_pipeline.png) |
-
-### Frontend Evidence (`fronted-images/`)
-
-| View | Screenshot |
-| --- | --- |
-| Dashboard | ![Dashboard](fronted-images/Dashboard.png) |
-| Create task modal | ![Create task](fronted-images/task-creation.png) |
-| Command execution modal | ![Run task](fronted-images/run-task.png) |
-| Success notification | ![Success](fronted-images/Submission&success.png) |
-| Search results | ![Search](fronted-images/Search.png) |
-| Delete confirmation | ![Delete](fronted-images/Delete.png) |
-| Post-delete state | ![After delete](fronted-images/after-delete.png) |
-
-### Demo Video (Optional but recommended)
-
-[![Video thumbnail placeholder](images/TODO_video_thumb.png)](https://example.com/TODO_demo_video_url)  
-_(Update the link and thumbnail once the recording is ready. Ensure the frame shows name + timestamp.)_
-
----
-
-## Task 1 – Spring Boot REST API
-
-### Start the API locally
-
-```powershell
-mvn spring-boot:run
-```
-
-Default URL: `http://localhost:8081/api/tasks`
-
-Endpoints:
-- `GET /api/tasks` – list (supports `?name=` filter)
-- `GET /api/tasks/{id}` – fetch single task
-- `POST /api/tasks` – create (validates required fields)
-- `PUT /api/tasks/{id}` – update
-- `DELETE /api/tasks/{id}` – remove
-- `PUT /api/tasks/{id}/execute` – run command and capture output
-
-Execution flow:
-1. Try to create a temporary BusyBox pod via Kubernetes Java client.  
-2. If Kubernetes is unavailable, fall back to local shell execution with `ProcessBuilder`.  
-3. Persist `startTime`, `endTime`, and `output` in `TaskExecution`.  
-4. Store task + execution details in MongoDB (`kaiburrdb` by default).
-
-### Run backend tests
-
-```powershell
-mvn test
-```
-
-Tests include unit coverage for command execution fallback and a Spring Boot context load.
-
----
-
-## Task 2 – Kubernetes Deployment
-
-### Build the Docker image
-
-```powershell
-mvn -DskipTests clean package
-docker build -t kaiburr-task-api:latest .
-```
-
-### Deploy to Minikube
-
-```powershell
-minikube start --driver=docker
-kubectl apply -f k8/app.yaml        # config map, secrets, PVC
-kubectl apply -f k8/deployment.yaml # Spring Boot deployment
-kubectl apply -f k8/service.yaml    # NodePort/LoadBalancer service
-```
-
-Verify:
-```powershell
-kubectl get pods
-kubectl get svc
-minikube service task-api-service --url
-```
-
-Use curl/Postman against the exposed URL, capture screenshots, and confirm MongoDB data survives pod restarts (PVC bound to Mongo deployment).
-
----
-
-## Task 3 – React Web UI
-
-### Development Server
-
-```powershell
-cd frontend
-npm install          # or npm ci
-npm run dev
-```
-
-Open http://localhost:5173. The UI targets `http://localhost:8081/api` by default. Override via `.env`:
-```
-VITE_API_BASE_URL=http://localhost:8081/api
-```
-
-### Production Build & Checks
-
-```powershell
-npm run lint
-npm run build
-```
-
-Features:
-- Task table with sorting, responsive layout, and accessible actions
-- Modal form with validation and server error surfacing
-- Drawer view showing command history
-- Execution modal with output, exit code, timestamps, and copy support
-
----
-
-## Task 4 – CI/CD Pipeline
-
-Pipeline definition lives at `.github/workflows/ci.yml` and is intentionally limited to **local-style build verification** (no cloud deploy step). It runs automatically for pushes and pull requests to `main`.
-
-Stages:
-1. **Checkout** repo
-2. **MongoDB service** – run a disposable container so backend tests can connect
-3. **Backend build/test** – set up Temurin JDK 17 and execute `mvn clean package`
-4. **Frontend lint/build** – set up Node.js 22, run `npm ci`, `npm run lint`, `npm run build`
-5. **Docker build** – build the local deployment image `taskapi:${{ github.sha }}`
-
-You can execute the same workflow locally using [act](https://github.com/nektos/act):
+## Running the Pipeline Locally
+You can mirror the GitHub Actions run on your workstation using [`act`](https://github.com/nektos/act):
 
 ```powershell
 act -j build
 ```
 
-(Requires Docker; cache paths can be customised if necessary.)
+Requirements:
+- Docker installed and running.
+- The default `act` image provides Node.js and Java; when prompted, select the medium or large image to include Docker-in-Docker support.
 
-Capture the successful GitHub Actions run and replace `images/TODO_pipeline.png`.
+## Customization Tips
+- **Branch strategy**: Adjust the `on:` block if you need the workflow on additional branches or tags.
+- **Test matrix**: Add a strategy matrix to run against multiple Java or Node.js versions.
+- **Artifact publishing**: Append `actions/upload-artifact` steps to persist the Maven JAR or Vite build output.
+- **Container registry**: Append a push step (for example, `docker/login-action` and `docker/build-push-action`) to publish images to Docker Hub, ECR, or GHCR.
 
----
+## Troubleshooting
+- **MongoDB health check fails**: Increase retries or verify that your tests close connections. The current configuration performs five health probes at ten-second intervals.
+- **Docker build errors**: Confirm the backend build produced `target/taskapi.jar` and that the Dockerfile's exposed port matches the application port (`8081` for this project).
+- **npm cache misses**: Double-check `frontend/package-lock.json` is committed; the cache key relies on this file.
+- **Workflow permissions**: Ensure your repository allows GitHub Actions to run (`Settings > Actions > General > Allow all actions and reusable workflows`).
 
-## Quality Gates & Troubleshooting
-
-| Command | Purpose |
-| --- | --- |
-| `mvn clean package` | Compile + run backend unit tests |
-| `mvn test` | Execute backend test suite only |
-| `npm run lint` | ESLint check for React app |
-| `npm run build` | Type-check and build production UI bundle |
-| `docker build -t kaiburr-task-api:local .` | Verify container build locally |
-
-### Common Issues
-
-| Problem | Fix |
-| --- | --- |
-| Port 8081 already in use | Stop existing Spring Boot instance (`netstat -ano | findstr 8081` then `taskkill /PID <pid> /F`) |
-| API execution still fails with Kubernetes error | Ensure you restarted after the fallback change; log should show “Kubernetes execution failed, attempting local execution instead” |
-| MongoDB connection refused | Update `SPRING_DATA_MONGODB_URI` or start MongoDB container/service |
-| Frontend cannot reach API | Update `.env` with the correct base URL and restart `npm run dev` |
-| GitHub Actions Maven step fails | Confirm MongoDB service is healthy; rerun pipeline |
-
----
-
-## Submission Checklist
-
-- [ ] Update screenshot placeholders with files containing name + timestamp  
-- [ ] Upload demo video and link it in this README (optional but recommended)  
-- [ ] Ensure README, manifests, and code are committed and pushed  
-- [ ] Verify GitHub Actions pipeline succeeds on latest commit  
-- [ ] Submit repository link via Kaiburr form
-
----
-
-© 2025 Kaiburr LLC. All rights reserved. Submitted solely for recruitment evaluation.
+## Pipeline Evidence
+- Workflow summary view  
+  ![GitHub Actions workflow summary](.github/workflows/ci-cd-images/Screenshot%202025-10-20%20230656.png)
+- Job details with individual steps  
+  ![GitHub Actions job details](.github/workflows/ci-cd-images/Screenshot%202025-10-20%20230705.png)
